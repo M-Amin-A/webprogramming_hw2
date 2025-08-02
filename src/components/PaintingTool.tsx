@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { Link, useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { toast } from "react-hot-toast";
 import { CanvasArea } from "./CanvasArea";
@@ -18,6 +19,7 @@ export const PaintingTool = () => {
   const [title, setTitle] = useState("Painting Title");
   const [objects, setObjects] = useState<CanvasObject[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const addObject = (type: 'circle' | 'square' | 'triangle', x: number, y: number) => {
     const newObject: CanvasObject = {
@@ -33,56 +35,91 @@ export const PaintingTool = () => {
     setObjects(prev => prev.filter(obj => obj.id !== id));
   };
 
-  const exportCanvas = () => {
-    const data = {
+  const exportCanvas = async () => {
+    const data = JSON.stringify({
       title,
       objects,
       timestamp: new Date().toISOString(),
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json',
     });
     
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title.replace(/\s+/g, '_')}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    toast.success("Canvas exported successfully!");
-  };
+    try {
+      const response = await fetch(`http://localhost:8080/api/drawing`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({drawing: data}),
+      });
 
-  const importCanvas = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target?.result as string);
-        if (data.title && Array.isArray(data.objects)) {
-          setTitle(data.title);
-          setObjects(data.objects);
-          toast.success("Canvas imported successfully!");
-        } else {
-          toast.error("Invalid file format");
-        }
-      } catch (error) {
-        toast.error("Error importing file");
+      const result = await response.json();
+      
+      if (response.ok) {
+        toast.success(`Canvas exported successfully!`);
+      } else {
+        toast.error(result.message || "Failed to export canvas");
       }
-    };
-    reader.readAsText(file);
-    
-    // Reset the input
-    event.target.value = '';
+    } catch (error) {
+      toast.error("Error exporting canvas");
+    }
+  };
+
+  const importCanvas = async () => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/drawing`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+      });
+      const payload = await response.json();
+
+      if (response.ok) {
+        try {
+          const data = JSON.parse(payload.drawing)
+          if (data.title && Array.isArray(data.objects)) {
+            setTitle(data.title);
+            setObjects(data.objects);
+            toast.success("Canvas imported successfully!");
+          } else {
+            toast.error("Invalid file format");
+          }
+        } catch (error) {
+          toast.error("Error importing file");
+        }
+      }
+    } catch (error) {
+      toast.error("Error importing canvas");
+    }
+  };
+
+  const signout = async () => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({
+          username: localStorage.getItem("username"),
+          token: localStorage.getItem("token"),
+        }),
+      });
+
+      if (response.ok) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+
+        toast.success("Successfully signed out!");
+        navigate("/");
+      }
+      else{
+        toast.error("Error Signing out");
+      }
+    } catch (error) {
+      toast.error("Error Signing out");
+    }
   };
 
   const getObjectCounts = () => {
@@ -106,12 +143,15 @@ export const PaintingTool = () => {
         
         <div className="flex gap-2">
           <Button onClick={exportCanvas} variant="outline" className="flex items-center gap-2">
-            <Download className="w-4 h-4" />
-            Export
+            <Upload className="w-4 h-4" />
+            Upload
           </Button>
           <Button onClick={importCanvas} variant="outline" className="flex items-center gap-2">
-            <Upload className="w-4 h-4" />
-            Import
+            <Download className="w-4 h-4" />
+            Download
+          </Button>
+          <Button onClick={signout} variant="outline" className="flex items-center gap-2">
+            Signout
           </Button>
         </div>
       </div>
@@ -128,15 +168,6 @@ export const PaintingTool = () => {
 
       {/* Status Bar */}
       <StatusBar counts={getObjectCounts()} />
-
-      {/* Hidden file input */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileImport}
-        accept=".json"
-        className="hidden"
-      />
     </div>
   );
 };
